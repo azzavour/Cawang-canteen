@@ -38,7 +38,8 @@ def create_tables(fresh: bool = False):
             employee_group TEXT,
             admin BOOLEAN DEFAULT 0,
             is_disabled BOOLEAN DEFAULT 0,
-            is_blocked BOOLEAN DEFAULT 0
+            is_blocked BOOLEAN DEFAULT 0,
+            email TEXT
         )
     """
     )
@@ -46,6 +47,8 @@ def create_tables(fresh: bool = False):
     employee_columns = [row[1] for row in cursor.fetchall()]
     if "order_token_hash" not in employee_columns:
         cursor.execute("ALTER TABLE employees ADD COLUMN order_token_hash TEXT")
+    if "email" not in employee_columns:
+        cursor.execute("ALTER TABLE employees ADD COLUMN email TEXT")
 
     # Tenant Table
     cursor.execute(

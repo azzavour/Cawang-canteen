@@ -8,8 +8,9 @@ import datetime
 import io
 import calendar
 from uuid import uuid4
+from urllib.parse import quote_plus
 
-from fastapi import APIRouter, Request, HTTPException, status, Query
+from fastapi import APIRouter, Request, HTTPException, status, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 from openpyxl import Workbook
@@ -18,13 +19,21 @@ from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
 from . import sse_manager
 from .sqlite_database import get_db_connection
+from .email_service import send_order_ticket_email
 
 router = APIRouter()
 
 
-class SseTriggerRequest(BaseModel):
-    id: str
-    name: str
+def get_whatsapp_number_for_tenant(tenant_name: str) -> Optional[str]:
+    mapping = {
+        "yanti": "6285880259653",
+        "rima": "6285718899709",
+    }
+    name_lower = tenant_name.lower()
+    for key, number in mapping.items():
+        if key in name_lower:
+            return number
+    return None
 
 
 class EmployeeCreateRequest(BaseModel):
@@ -184,13 +193,13 @@ def create_transaction(transaction_data: TransactionCreateRequest):
 
 
 @router.post("/preorder", status_code=status.HTTP_201_CREATED)
-def create_preorder(preorder: PreorderCreateRequest):
+def create_preorder(preorder: PreorderCreateRequest, background_tasks: BackgroundTasks):
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
         cursor.execute(
             """
-            SELECT employee_id, card_number, name, is_disabled, is_blocked, order_token_hash
+            SELECT employee_id, card_number, name, is_disabled, is_blocked, order_token_hash, email
             FROM employees
             WHERE employee_id = ?
             """,
@@ -286,6 +295,27 @@ def create_preorder(preorder: PreorderCreateRequest):
             queue_number = cursor.fetchone()[0] + 1
 
         order_code = uuid4().hex
+        order_datetime = datetime.datetime.now()
+        weekday_names = [
+            "Senin",
+            "Selasa",
+            "Rabu",
+            "Kamis",
+            "Jumat",
+            "Sabtu",
+            "Minggu",
+        ]
+        weekday_name = weekday_names[order_datetime.weekday()]
+        order_datetime_text = f"{weekday_name} {order_datetime.strftime('%d/%m/%Y, %H.%M')}"
+        whatsapp_url = ""
+        wa_number = get_whatsapp_number_for_tenant(tenant["name"])
+        if wa_number:
+            message = (
+                f"Halo Bu, saya {employee['name']} (ID: {preorder.employee_id}) "
+                f"sudah memesan {preorder.menu_label} di {tenant['name']} pada {order_datetime_text}. "
+                f"Kode pesanan: {order_code}. Nomor pesanan: {queue_number}."
+            )
+            whatsapp_url = f"https://api.whatsapp.com/send?phone={wa_number}&text={quote_plus(message)}"
         cursor.execute(
             """
             INSERT INTO preorders (
@@ -314,6 +344,19 @@ def create_preorder(preorder: PreorderCreateRequest):
             ),
         )
         conn.commit()
+
+        background_tasks.add_task(
+            send_order_ticket_email,
+            to_email=employee["email"],
+            order_code=order_code,
+            employee_name=employee["name"],
+            employee_id=preorder.employee_id,
+            tenant_name=tenant["name"],
+            menu_label=preorder.menu_label,
+            queue_number=queue_number,
+            order_datetime_text=order_datetime_text,
+            whatsapp_url=whatsapp_url,
+        )
 
         return JSONResponse(
             content={
@@ -677,15 +720,7 @@ def get_dashboard_overview():
                 d.device_code,
                 t.id AS tenant_id,
                 t.name AS tenant_name,
-                t.quota,
-                (SELECT COUNT(*)
-                 FROM transactions tr
-                 WHERE tr.tenant_id = t.id AND DATE(tr.transaction_date) = ?) AS transaction_count,
-                (SELECT tr.employee_name
-                 FROM transactions tr
-                 WHERE tr.tenant_id = t.id AND DATE(tr.transaction_date) = ?
-                 ORDER BY tr.transaction_date DESC
-                 LIMIT 1) AS latest_employee_name
+                COALESCE(t.quota, 0) AS quota
             FROM
                 devices d
             JOIN
@@ -695,7 +730,7 @@ def get_dashboard_overview():
             ORDER BY
                 d.tenant_id
         """
-        cursor.execute(query, (today, today))
+        cursor.execute(query)
 
         devices_with_tenants = cursor.fetchall()
 
@@ -717,15 +752,62 @@ def get_dashboard_overview():
         for row in devices_with_tenants:
             tenant_id = row["tenant_id"]
 
+            cursor.execute(
+                """
+                SELECT COALESCE(COUNT(*), 0) AS ordered_count
+                FROM preorders
+                WHERE tenant_id = ?
+                  AND DATE(order_date) = DATE('now','localtime')
+                """,
+                (tenant_id,),
+            )
+            ordered_row = cursor.fetchone()
+            ordered = int(ordered_row["ordered_count"]) if ordered_row else 0
+
+            cursor.execute(
+                """
+                SELECT
+                    p.queue_number,
+                    p.menu_label,
+                    e.name AS employee_name,
+                    e.employee_id
+                FROM preorders p
+                LEFT JOIN employees e ON e.employee_id = p.employee_id
+                WHERE p.tenant_id = ?
+                  AND DATE(p.order_date) = DATE('now','localtime')
+                ORDER BY p.order_date DESC, p.id DESC
+                LIMIT 1
+                """,
+                (tenant_id,),
+            )
+            last_order_row = cursor.fetchone()
+            last_order = None
+            if last_order_row:
+                last_order = {
+                    "queueNumber": last_order_row["queue_number"],
+                    "menuLabel": last_order_row["menu_label"],
+                    "employeeName": last_order_row["employee_name"],
+                    "employeeId": last_order_row["employee_id"],
+                }
+
+            quota_value = int(row["quota"] or 0)
+            available = quota_value
+
             device_info = {
                 "device_code": row["device_code"],
+                "tenantId": tenant_id,
+                "tenantName": row["tenant_name"],
+                "available": available,
+                "ordered": ordered,
+                "lastOrder": last_order,
                 "tenant": {
                     "id": tenant_id,
                     "name": row["tenant_name"],
                     "menu": all_menus.get(tenant_id, []),
-                    "quota": row["quota"],
-                    "transaction_count": row["transaction_count"],
-                    "latest_employee_name": row["latest_employee_name"],
+                    "quota": quota_value,
+                    "ordered": ordered,
+                    "available": available,
+                    "lastOrder": last_order,
                 },
             }
             result.append(device_info)

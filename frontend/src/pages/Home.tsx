@@ -8,14 +8,22 @@ import {
 } from "../components/ui/card";
 import { cn } from "../lib/utils";
 
+interface VendorLastOrder {
+  queueNumber: number;
+  menuLabel: string;
+  employeeName: string;
+  employeeId: string;
+}
+
 interface Vendor {
   deviceCode: string;
   tenantId: number;
   tenantName: string;
   quota: number;
   menu: string[];
+  available: number;
   used: number;
-  lastOrder: string;
+  lastOrder: VendorLastOrder | null;
   color: string;
 }
 
@@ -78,25 +86,33 @@ export default function Home() {
         }
         const overviewData: {
           device_code: string;
+          tenantId?: number;
+          tenantName?: string;
+          quota?: number | null;
+          available?: number;
+          ordered?: number;
+          lastOrder?: VendorLastOrder | null;
           tenant: {
             id: number;
             name: string;
             menu: string[];
-            quota: number;
-            transaction_count: number;
-            latest_employee_name: string | null;
+            quota: number | null;
+            available?: number;
+            ordered?: number;
+            lastOrder?: VendorLastOrder | null;
           };
         }[] = await overviewResponse.json();
 
         setVendors(
           overviewData.map((device) => {
             let color = "text-green-500";
-            if (device.tenant.transaction_count === device.tenant.quota) {
+            const available = Number(device.available ?? device.tenant?.available ?? 0);
+            const used = Number(device.ordered ?? device.tenant?.ordered ?? 0);
+            const quotaValue = device.tenant?.quota ?? null;
+            const quota = typeof quotaValue === "number" ? quotaValue : 0;
+            if (quota > 0 && used >= quota) {
               color = "text-red-500";
-            } else if (
-              device.tenant.transaction_count >
-              (device.tenant.quota * 2) / 3
-            ) {
+            } else if (quota > 0 && used > (quota * 2) / 3) {
               color = "text-yellow-500";
             }
 
@@ -104,10 +120,11 @@ export default function Home() {
               deviceCode: device.device_code,
               tenantId: device.tenant.id,
               tenantName: device.tenant.name,
-              quota: device.tenant.quota,
+              quota: quotaValue ?? 0,
               menu: device.tenant.menu,
-              used: device.tenant.transaction_count,
-              lastOrder: device.tenant.latest_employee_name ?? "",
+              available: available,
+              used: used,
+              lastOrder: device.lastOrder ?? null,
               color: color,
             };
           })
@@ -230,7 +247,14 @@ export default function Home() {
               return {
                 ...vendor,
                 used: newUsed,
-                lastOrder: data.name,
+                lastOrder: vendor.lastOrder
+                  ? { ...vendor.lastOrder, employeeName: data.name ?? "" }
+                  : {
+                      queueNumber: newUsed,
+                      menuLabel: "",
+                      employeeName: data.name ?? "",
+                      employeeId: "",
+                    },
                 color: newColor,
               };
             }
@@ -294,7 +318,13 @@ export default function Home() {
                   <div className="text-center text-xl text-gray-700">
                     Available:
                     <div className="text-7xl font-black text-slate-800 my-3">
-                      {Math.max(vendor.quota - vendor.used, 0)}
+                      {(() => {
+                        const safeAvailable = Number(vendor.available);
+                        const numericValue = Number.isFinite(safeAvailable)
+                          ? safeAvailable
+                          : 0;
+                        return numericValue.toLocaleString("id-ID");
+                      })()}
                     </div>
                     <div className="text-lg text-gray-600">
                       Ordered:{" "}
@@ -325,7 +355,9 @@ export default function Home() {
                 <div className="mt-4 border-t border-gray-200 pt-4 text-center">
                   <p className="text-sm font-medium text-gray-600 mb-2">Last Order</p>
                   <p className="rounded-full border border-gray-300 px-4 py-2 text-sm font-semibold text-gray-800">
-                    {vendor.lastOrder !== "" ? vendor.lastOrder : "Be The First to Order"}
+                      {vendor.lastOrder
+                        ? `${vendor.lastOrder.employeeName ?? ""} (${vendor.lastOrder.employeeId ?? ""})`
+                        : "Be The First to Order"}
                   </p>
                 </div>
               </Card>
