@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -149,6 +149,11 @@ export default function Home() {
 
     if (!employeeId) {
       setPreorderError("Employee ID wajib diisi.");
+      return;
+    }
+
+    if (!token) {
+      alert("Token wajib diisi.");
       return;
     }
 
@@ -450,6 +455,23 @@ export default function Home() {
                   value={employeeId}
                   readOnly
                 />
+              </div>
+
+              <div className="space-y-1">
+                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Token / Kode Pre-Order
+                </label>
+                <input
+                  type="text"
+                  value={token}
+                  maxLength={6}
+                  onChange={(e) => setToken(e.target.value.toUpperCase())}
+                  placeholder="Masukkan kode 6 karakter"
+                  className="w-full rounded-2xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
+                />
+                <small className="text-[11px] text-gray-500">
+                  Gunakan kode yang dikirim ke email Anda.
+                </small>
               </div>
 
               {preorderError && (

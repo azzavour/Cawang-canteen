@@ -1,6 +1,5 @@
 import json
 import math
-import hashlib
 from typing import List, Optional
 from collections import defaultdict
 import asyncio
@@ -19,7 +18,7 @@ from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
 from . import sse_manager
 from .sqlite_database import get_db_connection
-from .email_service import send_order_ticket_email
+from .email_service import send_order_ticket_email, send_employee_token_email
 
 router = APIRouter()
 
@@ -119,7 +118,7 @@ class TransactionUpdateRequest(BaseModel):
 
 class PreorderCreateRequest(BaseModel):
     employee_id: str = Field(min_length=1, alias="employeeId")
-    token: str = Field(min_length=4, alias="token")
+    token: str = Field(min_length=6, alias="token")
     tenant_id: int = Field(alias="tenantId")
     menu_label: str = Field(min_length=1, alias="menuLabel")
 
@@ -207,7 +206,7 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
     try:
         cursor.execute(
             """
-            SELECT employee_id, card_number, name, is_disabled, is_blocked, order_token_hash, email
+            SELECT employee_id, card_number, name, is_disabled, is_blocked, token, email
             FROM employees
             WHERE employee_id = ?
             """,
@@ -224,11 +223,13 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
                 detail="Pegawai tidak dapat melakukan pre-order.",
             )
 
-        token_hash = hashlib.sha256(preorder.token.encode("utf-8")).hexdigest()
-        stored_token_hash = employee["order_token_hash"]
-        if not stored_token_hash or stored_token_hash != token_hash:
+        provided_token = preorder.token.strip().upper()
+        stored_token = (employee["token"] or "").strip().upper()
+        # Tokens are now persistent per employee; compare directly without hashing.
+        if not stored_token or stored_token != provided_token:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST, detail="Token tidak valid"
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token atau Employee ID tidak valid.",
             )
 
         cursor.execute(
@@ -243,23 +244,6 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
             )
 
         today = datetime.date.today().isoformat()
-
-        cursor.execute(
-            """
-            SELECT 1 FROM preorders
-            WHERE employee_id = ?
-              AND tenant_id = ?
-              AND order_date = ?
-              AND status IN ('PENDING','TAKEN')
-            LIMIT 1
-            """,
-            (preorder.employee_id, preorder.tenant_id, today),
-        )
-        if cursor.fetchone():
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Pre-order sudah dibuat untuk tenant ini hari ini.",
-            )
 
         queue_number: Optional[int] = None
         remaining_quota: Optional[int] = None
@@ -391,6 +375,52 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Gagal membuat pre-order: {e}",
+        )
+    finally:
+        conn.close()
+
+
+# Endpoint admin sekali-jalan untuk mengirim token karyawan via email.
+@router.post("/admin/send-employee-tokens", status_code=status.HTTP_200_OK)
+def send_employee_tokens():
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            """
+            SELECT employee_id, name, email, token
+            FROM employees
+            """
+        )
+        employees = cursor.fetchall()
+
+        sent_count = 0
+        for employee in employees:
+            email = (employee["email"] or "").strip()
+            token = (employee["token"] or "").strip()
+            if not email or not token:
+                continue
+            try:
+                send_employee_token_email(
+                    to_email=email,
+                    employee_name=employee["name"],
+                    employee_id=employee["employee_id"],
+                    token=token,
+                )
+                sent_count += 1
+            except Exception as email_error:
+                print(
+                    f"Gagal mengirim token ke {employee['employee_id']} ({employee['name']}): {email_error}"
+                )
+
+        return JSONResponse(
+            content={"status": "emails_sent", "count": sent_count},
+            status_code=status.HTTP_200_OK,
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Gagal mengirim email token karyawan: {e}",
         )
     finally:
         conn.close()

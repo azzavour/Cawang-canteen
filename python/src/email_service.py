@@ -138,3 +138,43 @@ Foto bukti order ini untuk dilampirkan saat melakukan konfirmasi.
         if SMTP_USERNAME and SMTP_PASSWORD:
             server.login(SMTP_USERNAME, SMTP_PASSWORD)
         server.send_message(msg)
+
+
+def send_employee_token_email(
+    to_email: Optional[str],
+    employee_name: str,
+    employee_id: str,
+    token: str,
+) -> None:
+    """
+    Kirim email token pre-order ke karyawan.
+    """
+    if not to_email or not token:
+        return
+
+    subject = "Kode Pre-Order PGI Canteen Anda"
+    plain_text = f"""
+Halo {employee_name},
+
+Berikut adalah kode pre-order PGI Canteen Anda:
+
+Employee ID : {employee_id}
+Kode Token  : {token}
+
+Simpan kode ini dan gunakan setiap kali melakukan pre-order.
+Kode bersifat pribadi dan mohon tidak dibagikan kepada orang lain.
+
+Terima kasih.
+""".strip()
+
+    msg = EmailMessage()
+    msg["Subject"] = subject
+    msg["From"] = SMTP_FROM or SMTP_USERNAME
+    msg["To"] = to_email
+    msg.set_content(plain_text)
+
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+        server.starttls()
+        if SMTP_USERNAME and SMTP_PASSWORD:
+            server.login(SMTP_USERNAME, SMTP_PASSWORD)
+        server.send_message(msg)
