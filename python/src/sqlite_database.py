@@ -32,6 +32,7 @@ def create_tables(fresh: bool = False):
         """
         CREATE TABLE IF NOT EXISTS employees (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticket_number TEXT, 
             employee_id TEXT,
             card_number TEXT,
             name TEXT,

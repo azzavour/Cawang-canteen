@@ -24,6 +24,14 @@ from .email_service import send_order_ticket_email
 router = APIRouter()
 
 
+def generate_ticket_number(
+    order_datetime: datetime.datetime, queue_number: int
+) -> str:
+    date_part = order_datetime.strftime("%y%m%d")
+    queue_part = f"{queue_number:03d}"
+    return f"{date_part}-{queue_part}"
+
+
 def get_whatsapp_number_for_tenant(tenant_name: str) -> Optional[str]:
     mapping = {
         "yanti": "6285880259653",
@@ -296,6 +304,7 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
 
         order_code = uuid4().hex
         order_datetime = datetime.datetime.now()
+        ticket_number = generate_ticket_number(order_datetime, queue_number)
         weekday_names = [
             "Senin",
             "Selasa",
@@ -313,13 +322,14 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
             message = (
                 f"Halo Bu, saya {employee['name']} (ID: {preorder.employee_id}) "
                 f"sudah memesan {preorder.menu_label} di {tenant['name']} pada {order_datetime_text}. "
-                f"Kode pesanan: {order_code}. Nomor pesanan: {queue_number}."
+                f"Kode pesanan: {ticket_number}. Nomor pesanan: {queue_number}."
             )
             whatsapp_url = f"https://api.whatsapp.com/send?phone={wa_number}&text={quote_plus(message)}"
         cursor.execute(
             """
             INSERT INTO preorders (
                 order_code,
+                ticket_number,
                 employee_id,
                 card_number,
                 employee_name,
@@ -329,10 +339,11 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
                 order_date,
                 status,
                 queue_number
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
             """,
             (
                 order_code,
+                ticket_number,
                 preorder.employee_id,
                 employee["card_number"],
                 employee["name"],
@@ -348,7 +359,7 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
         background_tasks.add_task(
             send_order_ticket_email,
             to_email=employee["email"],
-            order_code=order_code,
+            ticket_number=ticket_number,
             employee_name=employee["name"],
             employee_id=preorder.employee_id,
             tenant_name=tenant["name"],
@@ -360,7 +371,8 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
 
         return JSONResponse(
             content={
-                "orderCode": order_code,
+                "orderCode": ticket_number,
+                "orderHash": order_code,
                 "employeeId": preorder.employee_id,
                 "employeeName": employee["name"],
                 "tenantId": tenant["id"],

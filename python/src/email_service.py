@@ -10,10 +10,12 @@ SMTP_USERNAME = os.getenv("SMTP_USERNAME")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "no-reply@pgi-canteen.local")
 
+MANAGER_NAME = "Nama Manajer"
+
 
 def send_order_ticket_email(
     to_email: Optional[str],
-    order_code: str,
+    ticket_number: str,
     employee_name: str,
     employee_id: str,
     tenant_name: str,
@@ -29,12 +31,22 @@ def send_order_ticket_email(
     if not to_email:
         return
 
-    subject = f"[PGI Canteen] Tiket Pre-Order #{queue_number}"
+    subject = "Konfirmasi Pemesanan Kantin Cawang"
+    manager_name = MANAGER_NAME
 
     plain_text = f"""
-Tiket pre-order kantin Anda sudah tercatat di sistem.
+Subject: Konfirmasi Pemesanan Kantin Cawang
 
-ORDER   : {order_code}
+Halo {employee_name},
+
+Terima kasih telah melakukan pemesanan melalui PGI Canteen. Pesanan Anda telah berhasil kami terima dan tercatat di sistem.
+
+Ketersediaan menu akan dikonfirmasi langsung oleh tenant terkait pada saat proses konfirmasi pesanan. Jika menu tidak tersedia, Anda dapat memilih menu lain dari tenant yang sama.
+
+Terima kasih atas pengertian dan kerja sama Anda.
+
+
+ORDER   : {ticket_number}
 Tanggal : {order_datetime_text}
 
 Nama    : {employee_name} ({employee_id})
@@ -42,9 +54,7 @@ Kantin  : {tenant_name}
 Menu    : {menu_label}
 Nomor   : {queue_number}
 
-Sebagai konfirmasi, mohon tunjukkan tiket ini saat mengambil makanan di kantin.
-Jika perlu, Anda juga dapat membuka WhatsApp dengan link berikut:
-{whatsapp_url}
+Foto bukti order ini untuk dilampirkan saat melakukan konfirmasi.
 """.strip()
 
     html_body = f"""
@@ -52,9 +62,30 @@ Jika perlu, Anda juga dapat membuka WhatsApp dengan link berikut:
 <html>
   <body style="font-family: Arial, sans-serif; color:#000;">
     <div style="max-width:600px;margin:0 auto;">
-      <div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:8px;">
-        <div><strong>ORDER : </strong><span style="font-family:monospace;">{order_code}</span></div>
-        <div>{order_datetime_text}</div>
+      <p style="font-size:14px; margin:0 0 8px 0;">
+        Halo {employee_name},
+      </p>
+      <p style="font-size:13px; margin:0 0 8px 0;">
+        Terima kasih telah melakukan pemesanan melalui PGI Canteen. Pesanan Anda telah berhasil kami terima dan tercatat di sistem.
+      </p>
+      <p style="font-size:13px; margin:0 0 16px 0;">
+        Ketersediaan menu akan dikonfirmasi langsung oleh tenant terkait pada saat proses konfirmasi pesanan. Jika menu tidak tersedia, Anda dapat memilih menu lain dari tenant yang sama.
+      </p>
+      <p style="font-size:13px; margin:0 0 16px 0;">
+        Terima kasih atas pengertian dan kerja sama Anda.<br/>
+        Salam,<br/>
+        Manajer Kantin<br/>
+        {manager_name}
+      </p>
+
+      <div style="display:flex; justify-content:space-between; font-size:12px; margin:16px 0 8px 0;">
+        <div>
+          <strong>ORDER : </strong>
+          <span style="font-family:monospace;">{ticket_number}</span>
+        </div>
+        <div>
+          {order_datetime_text}
+        </div>
       </div>
 
       <div style="border:2px solid #000;padding:16px;">
@@ -94,8 +125,8 @@ Jika perlu, Anda juga dapat membuka WhatsApp dengan link berikut:
         </table>
       </div>
 
-      <p style="margin-top:12px;font-size:12px;font-weight:bold;text-align:center;">
-        Foto Bukti order ini untuk dilampirkan saat melakukan konfirmasi
+      <p style="text-align:center; font-size:12px; margin-top:16px;">
+        Foto bukti order ini untuk dilampirkan saat melakukan konfirmasi.
       </p>
     </div>
   </body>

@@ -43,6 +43,7 @@ export default function Home() {
   const [token, setToken] = useState("");
   const [orderResult, setOrderResult] = useState<{
     orderCode: string;
+    orderHash?: string;
     employeeId: string;
     employeeName: string;
     tenantId: number;
@@ -177,7 +178,18 @@ export default function Home() {
         return;
       }
 
-      setOrderResult(data);
+      const ticketData = {
+        orderCode: data.orderCode,
+        orderHash: data.orderHash,
+        employeeId: data.employeeId,
+        employeeName: data.employeeName,
+        tenantId: data.tenantId,
+        tenantName: data.tenantName,
+        menuLabel: data.menuLabel,
+        orderDate: data.orderDate,
+        queueNumber: data.queueNumber,
+      };
+      setOrderResult(ticketData);
       const formattedDate = new Date().toLocaleString("id-ID", {
         weekday: "long",
         day: "2-digit",
