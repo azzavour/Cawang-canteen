@@ -10,8 +10,6 @@ SMTP_USERNAME = os.getenv("SMTP_USERNAME")
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "no-reply@pgi-canteen.local")
 
-MANAGER_NAME = "Nama Manajer"
-
 
 def send_order_ticket_email(
     to_email: Optional[str],
@@ -32,7 +30,6 @@ def send_order_ticket_email(
         return
 
     subject = "Konfirmasi Pemesanan Kantin Cawang"
-    manager_name = MANAGER_NAME
 
     plain_text = f"""
 Subject: Konfirmasi Pemesanan Kantin Cawang
@@ -44,7 +41,6 @@ Terima kasih telah melakukan pemesanan melalui PGI Canteen. Pesanan Anda telah b
 Ketersediaan menu akan dikonfirmasi langsung oleh tenant terkait pada saat proses konfirmasi pesanan. Jika menu tidak tersedia, Anda dapat memilih menu lain dari tenant yang sama.
 
 Terima kasih atas pengertian dan kerja sama Anda.
-
 
 ORDER   : {ticket_number}
 Tanggal : {order_datetime_text}
@@ -72,10 +68,7 @@ Foto bukti order ini untuk dilampirkan saat melakukan konfirmasi.
         Ketersediaan menu akan dikonfirmasi langsung oleh tenant terkait pada saat proses konfirmasi pesanan. Jika menu tidak tersedia, Anda dapat memilih menu lain dari tenant yang sama.
       </p>
       <p style="font-size:13px; margin:0 0 16px 0;">
-        Terima kasih atas pengertian dan kerja sama Anda.<br/>
-        Salam,<br/>
-        Manajer Kantin<br/>
-        {manager_name}
+        Terima kasih atas pengertian dan kerja sama Anda.
       </p>
 
       <div style="display:flex; justify-content:space-between; font-size:12px; margin:16px 0 8px 0;">
