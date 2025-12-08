@@ -27,10 +27,9 @@ def _verify_token_in_portal_db(employee_id: str, portal_token: str) -> bool:
     db_name = os.getenv("PORTAL_DB_NAME")
     user = os.getenv("PORTAL_DB_USER")
     password = os.getenv("PORTAL_DB_PASSWORD")
-    table = os.getenv("PORTAL_DB_TABLE", "PortalEmployees")
+    table = os.getenv("PORTAL_DB_TABLE", "users")
 
     if not (pyodbc and all([driver, host, db_name, user, password])):
-        # Portal DB belum siap; gunakan dummy tokens untuk pengujian.
         print("Portal DB configuration incomplete; using dummy token mapping.")
         return (employee_id, portal_token) in DUMMY_PORTAL_TOKENS
 
