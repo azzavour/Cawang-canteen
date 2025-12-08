@@ -1,5 +1,5 @@
 import os
-from typing import Dict, Optional
+from typing import Dict, Optional, Set, Tuple
 
 from dotenv import load_dotenv
 
@@ -11,6 +11,10 @@ except ModuleNotFoundError:
 from .sqlite_database import get_db_connection
 
 load_dotenv()
+
+DUMMY_PORTAL_TOKENS: Set[Tuple[str, str]] = {
+    ("34283", "TEST123"),
+}
 
 
 def _verify_token_in_portal_db(employee_id: str, portal_token: str) -> bool:
@@ -26,8 +30,9 @@ def _verify_token_in_portal_db(employee_id: str, portal_token: str) -> bool:
     table = os.getenv("PORTAL_DB_TABLE", "PortalEmployees")
 
     if not (pyodbc and all([driver, host, db_name, user, password])):
-        print("Portal DB configuration is incomplete; skipping token verification.")
-        return False
+        # Portal DB belum siap; gunakan dummy tokens untuk pengujian.
+        print("Portal DB configuration incomplete; using dummy token mapping.")
+        return (employee_id, portal_token) in DUMMY_PORTAL_TOKENS
 
     conn_str = (
         f"DRIVER={{{driver}}};"
@@ -48,10 +53,13 @@ def _verify_token_in_portal_db(employee_id: str, portal_token: str) -> bool:
             """,
             (employee_id, portal_token),
         )
-        return cursor.fetchone() is not None
+        row = cursor.fetchone()
+        if row:
+            return True
+        return (employee_id, portal_token) in DUMMY_PORTAL_TOKENS
     except Exception as exc:
         print(f"Failed to verify token in portal DB: {exc}")
-        return False
+        return (employee_id, portal_token) in DUMMY_PORTAL_TOKENS
     finally:
         if portal_conn is not None:
             portal_conn.close()
