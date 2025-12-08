@@ -1,8 +1,12 @@
 import os
 import sqlite3
-from typing import Dict
+from typing import Dict, Optional
 
-import pyodbc
+try:
+    import pyodbc
+except ModuleNotFoundError:
+    pyodbc = None
+
 from dotenv import load_dotenv
 
 from src.sqlite_database import get_db_connection
@@ -11,8 +15,12 @@ from src.sqlite_database import get_db_connection
 DUMMY_EMAILS: Dict[str, str] = {
     "34283": "annisafitriana38@gmail.com",
     "34283": "izzynisa.26@gmail.com",
-    # Tambahkan mapping dummy lain di sini jika diperlukan.
 }
+
+
+def update_employee_email(employee_id: str) -> Optional[str]:
+    """Kembalikan email dummy untuk employee_id jika tersedia."""
+    return DUMMY_EMAILS.get(employee_id)
 
 
 def update_dummy_emails(conn: sqlite3.Connection) -> int:
@@ -36,6 +44,9 @@ def sync_emails_from_portal(conn: sqlite3.Connection) -> int:
     Sinkronisasi email dari database portal ke tabel employees (SQLite).
     Mengembalikan jumlah row yang berhasil diupdate.
     """
+    if pyodbc is None:
+        print("pyodbc is not installed; skipping portal email sync.")
+        return 0
     driver = os.getenv("PORTAL_DB_DRIVER")
     host = os.getenv("PORTAL_DB_HOST")
     port = os.getenv("PORTAL_DB_PORT", "1433")

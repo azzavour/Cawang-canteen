@@ -19,6 +19,7 @@ from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 from . import sse_manager
 from .sqlite_database import get_db_connection
 from .email_service import send_order_ticket_email, send_employee_token_email
+from update_employee_email import update_employee_email
 
 router = APIRouter()
 
@@ -223,6 +224,14 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
                 detail="Pegawai tidak dapat melakukan pre-order.",
             )
 
+        employee_email = (employee["email"] or "").strip()
+        if not employee_email:
+            employee_email = update_employee_email(preorder.employee_id)
+            if not employee_email:
+                print(
+                    f"Peringatan: email untuk employee_id {preorder.employee_id} tidak ditemukan di DB maupun dummy mapping."
+                )
+
         provided_token = preorder.token.strip().upper()
         stored_token = (employee["token"] or "").strip().upper()
         # Tokens are now persistent per employee; compare directly without hashing.
@@ -342,7 +351,7 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
 
         background_tasks.add_task(
             send_order_ticket_email,
-            to_email=employee["email"],
+            to_email=employee_email,
             ticket_number=ticket_number,
             employee_name=employee["name"],
             employee_id=preorder.employee_id,

@@ -4,6 +4,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+SAMPLE_EMPLOYEE = {
+    "employee_id": "34283",
+    "card_number": "CARD-34283",
+    "name": "Annisa",
+    "employee_group": "General",
+    "email": "annisafitriana38@gmail.com",
+}
+
 
 def get_db_connection():
     """Establishes a connection to the SQLite database."""
@@ -50,6 +58,32 @@ def create_tables(fresh: bool = False):
         cursor.execute("ALTER TABLE employees ADD COLUMN order_token_hash TEXT")
     if "email" not in employee_columns:
         cursor.execute("ALTER TABLE employees ADD COLUMN email TEXT")
+
+    # Ensure at least one sample employee has an email for testing purposes.
+    cursor.execute(
+        "SELECT id FROM employees WHERE employee_id = ?",
+        (SAMPLE_EMPLOYEE["employee_id"],),
+    )
+    sample_row = cursor.fetchone()
+    if sample_row:
+        cursor.execute(
+            "UPDATE employees SET email = ? WHERE employee_id = ?",
+            (SAMPLE_EMPLOYEE["email"], SAMPLE_EMPLOYEE["employee_id"]),
+        )
+    else:
+        cursor.execute(
+            """
+            INSERT INTO employees (employee_id, card_number, name, employee_group, email)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (
+                SAMPLE_EMPLOYEE["employee_id"],
+                SAMPLE_EMPLOYEE["card_number"],
+                SAMPLE_EMPLOYEE["name"],
+                SAMPLE_EMPLOYEE["employee_group"],
+                SAMPLE_EMPLOYEE["email"],
+            ),
+        )
 
     # Tenant Table
     cursor.execute(

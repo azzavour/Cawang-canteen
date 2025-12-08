@@ -4,11 +4,17 @@ import requests
 import os
 from dotenv import load_dotenv
 
+from fastapi import FastAPI
+
 from .inputs import create_input_window_and_loop
 from .sound_manager import SoundManager
 from . import app_state
+from .api_routes import router
 
 load_dotenv()
+
+app = FastAPI()
+app.include_router(router)
 
 # --- Configuration ---
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
