@@ -22,7 +22,7 @@ STUB_PORTAL_USERS: Dict[Tuple[str, str], Dict[str, str]] = {
 
 def verify_portal_token(employee_id: str, portal_token: str) -> Optional[Dict[str, str]]:
     """
-    Verifies combination of employee_id + portal_token against the portal database.
+    Verifies combination of employee_id + token against the portal database.
     Falls back to a stub user mapping when the portal DB is not available.
     """
     employee_id = (employee_id or "").strip()
