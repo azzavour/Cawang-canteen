@@ -4,10 +4,11 @@ from typing import List, Optional
 from collections import defaultdict
 import asyncio
 import datetime
+from datetime import date
 import io
 import calendar
+import os
 from uuid import uuid4
-from urllib.parse import quote_plus
 
 from fastapi import APIRouter, Request, HTTPException, status, Query, BackgroundTasks
 from fastapi.responses import StreamingResponse, JSONResponse, Response
@@ -18,7 +19,8 @@ from openpyxl.styles import Font, PatternFill, Border, Side, Alignment
 
 from . import sse_manager
 from .sqlite_database import get_db_connection
-from .email_service import send_order_ticket_email, send_employee_token_email
+from .email_service import send_order_confirmation
+from .portal_auth import verify_portal_token
 from update_employee_email import update_employee_email
 
 router = APIRouter()
@@ -119,12 +121,38 @@ class TransactionUpdateRequest(BaseModel):
 
 class PreorderCreateRequest(BaseModel):
     employee_id: str = Field(min_length=1, alias="employeeId")
-    token: str = Field(min_length=6, alias="token")
     tenant_id: int = Field(alias="tenantId")
     menu_label: str = Field(min_length=1, alias="menuLabel")
 
     class Config:
         validate_by_name = True
+
+
+class PortalLoginRequest(BaseModel):
+    employee_id: str = Field(min_length=1, alias="employeeId")
+    portal_token: str = Field(min_length=1, alias="portalToken")
+
+    class Config:
+        validate_by_name = True
+
+
+@router.post("/auth/portal-login")
+def portal_login(request: PortalLoginRequest):
+    """
+    Entry point for authentication requests coming from the portal.
+    Verifies employee_id + portal_token combination before allowing continued flow.
+    """
+    employee = verify_portal_token(request.employee_id, request.portal_token)
+    if not employee:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token portal atau employee_id tidak valid.",
+        )
+    return {
+        "employee_id": employee["employee_id"],
+        "name": employee.get("name"),
+        "email": employee.get("email"),
+    }
 
 
 @router.post("/transaction", status_code=status.HTTP_201_CREATED)
@@ -207,7 +235,7 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
     try:
         cursor.execute(
             """
-            SELECT employee_id, card_number, name, is_disabled, is_blocked, token, email
+            SELECT employee_id, card_number, name, is_disabled, is_blocked, email
             FROM employees
             WHERE employee_id = ?
             """,
@@ -222,8 +250,9 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Pegawai tidak dapat melakukan pre-order.",
-            )
+                )
 
+        card_number = employee["card_number"] or ""
         employee_email = (employee["email"] or "").strip()
         if not employee_email:
             employee_email = update_employee_email(preorder.employee_id)
@@ -231,15 +260,6 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
                 print(
                     f"Peringatan: email untuk employee_id {preorder.employee_id} tidak ditemukan di DB maupun dummy mapping."
                 )
-
-        provided_token = preorder.token.strip().upper()
-        stored_token = (employee["token"] or "").strip().upper()
-        # Tokens are now persistent per employee; compare directly without hashing.
-        if not stored_token or stored_token != provided_token:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token atau Employee ID tidak valid.",
-            )
 
         cursor.execute(
             "SELECT id, name, quota, is_limited FROM tenants WHERE id = ?",
@@ -252,48 +272,43 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
                 detail=f"Tenant dengan ID '{preorder.tenant_id}' tidak ditemukan.",
             )
 
-        today = datetime.date.today().isoformat()
+        today = date.today().isoformat()
+        cursor.execute(
+            """
+            SELECT 1
+            FROM preorders
+            WHERE employee_id = ?
+              AND order_date = ?
+            LIMIT 1
+            """,
+            (preorder.employee_id, today),
+        )
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Anda sudah melakukan pre-order hari ini. Hanya satu order per hari yang diperbolehkan.",
+            )
 
-        queue_number: Optional[int] = None
-        remaining_quota: Optional[int] = None
-        tenant_quota = tenant["quota"]
-        is_limited = bool(tenant["is_limited"])
-        if is_limited:
-            if tenant_quota is None or tenant_quota <= 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Kuota pre-order untuk menu ini sudah habis.",
-                )
-            cursor.execute(
-                """
-                UPDATE tenants
-                SET quota = quota - 1
-                WHERE id = ? AND quota > 0
-                """,
-                (tenant["id"],),
-            )
-            if cursor.rowcount == 0:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Kuota pre-order untuk menu ini sudah habis.",
-                )
-            cursor.execute(
-                "SELECT quota FROM tenants WHERE id = ?", (tenant["id"],)
-            )
-            updated_quota_row = cursor.fetchone()
-            remaining_quota = updated_quota_row["quota"]
-            queue_number = remaining_quota + 1
+        cursor.execute(
+            """
+            SELECT COUNT(*)
+            FROM preorders
+            WHERE tenant_id = ?
+              AND order_date = ?
+            """,
+            (preorder.tenant_id, today),
+        )
+        order_count_today = cursor.fetchone()[0] + 1
+
+        quota_value = tenant["quota"] or 0
+        if quota_value > 0:
+            queue_number = max(quota_value - order_count_today + 1, 0)
         else:
-            cursor.execute(
-                """
-                SELECT COUNT(*) FROM preorders
-                WHERE tenant_id = ?
-                  AND order_date = ?
-                  AND status IN ('PENDING','TAKEN')
-                """,
-                (preorder.tenant_id, today),
-            )
-            queue_number = cursor.fetchone()[0] + 1
+            queue_number = order_count_today
+
+        remaining_quota: Optional[int] = None
+        if quota_value > 0:
+            remaining_quota = max(quota_value - order_count_today, 0)
 
         order_code = uuid4().hex
         order_datetime = datetime.datetime.now()
@@ -309,15 +324,6 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
         ]
         weekday_name = weekday_names[order_datetime.weekday()]
         order_datetime_text = f"{weekday_name} {order_datetime.strftime('%d/%m/%Y, %H.%M')}"
-        whatsapp_url = ""
-        wa_number = get_whatsapp_number_for_tenant(tenant["name"])
-        if wa_number:
-            message = (
-                f"Halo Bu, saya {employee['name']} (ID: {preorder.employee_id}) "
-                f"sudah memesan {preorder.menu_label} di {tenant['name']} pada {order_datetime_text}. "
-                f"Kode pesanan: {ticket_number}. Nomor pesanan: {queue_number}."
-            )
-            whatsapp_url = f"https://api.whatsapp.com/send?phone={wa_number}&text={quote_plus(message)}"
         cursor.execute(
             """
             INSERT INTO preorders (
@@ -338,7 +344,7 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
                 order_code,
                 ticket_number,
                 preorder.employee_id,
-                employee["card_number"],
+                card_number,
                 employee["name"],
                 tenant["id"],
                 tenant["name"],
@@ -349,18 +355,33 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
         )
         conn.commit()
 
-        background_tasks.add_task(
-            send_order_ticket_email,
-            to_email=employee_email,
-            ticket_number=ticket_number,
-            employee_name=employee["name"],
-            employee_id=preorder.employee_id,
-            tenant_name=tenant["name"],
-            menu_label=preorder.menu_label,
-            queue_number=queue_number,
-            order_datetime_text=order_datetime_text,
-            whatsapp_url=whatsapp_url,
-        )
+        order_payload = {
+            "ticket_number": ticket_number,
+            "order_code": order_code,
+            "employee_id": preorder.employee_id,
+            "employee_name": employee["name"],
+            "tenant_name": tenant["name"],
+            "order_datetime_text": order_datetime_text,
+            "order_date": today,
+            "menu_label": preorder.menu_label,
+            "menu_items": [{"label": preorder.menu_label, "qty": 1}],
+            "queue_number": queue_number,
+        }
+        if employee_email:
+            background_tasks.add_task(
+                send_order_confirmation,
+                employee_email,
+                order_payload,
+                recipient="employee",
+            )
+        canteen_email = os.getenv("CANTEEN_ORDER_EMAIL")
+        if canteen_email:
+            background_tasks.add_task(
+                send_order_confirmation,
+                canteen_email,
+                order_payload,
+                recipient="canteen",
+            )
 
         return JSONResponse(
             content={
@@ -389,50 +410,14 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
         conn.close()
 
 
-# Endpoint admin sekali-jalan untuk mengirim token karyawan via email.
-@router.post("/admin/send-employee-tokens", status_code=status.HTTP_200_OK)
+# DEPRECATED: Endpoint admin sekali-jalan untuk mengirim token karyawan via email.
+# Flow generate_tokens / broadcast_employee_tokens tidak lagi dipakai oleh autentikasi utama.
+@router.post("/admin/send-employee-tokens", status_code=status.HTTP_410_GONE)
 def send_employee_tokens():
-    conn = get_db_connection()
-    cursor = conn.cursor()
-    try:
-        cursor.execute(
-            """
-            SELECT employee_id, name, email, token
-            FROM employees
-            """
-        )
-        employees = cursor.fetchall()
-
-        sent_count = 0
-        for employee in employees:
-            email = (employee["email"] or "").strip()
-            token = (employee["token"] or "").strip()
-            if not email or not token:
-                continue
-            try:
-                send_employee_token_email(
-                    to_email=email,
-                    employee_name=employee["name"],
-                    employee_id=employee["employee_id"],
-                    token=token,
-                )
-                sent_count += 1
-            except Exception as email_error:
-                print(
-                    f"Gagal mengirim token ke {employee['employee_id']} ({employee['name']}): {email_error}"
-                )
-
-        return JSONResponse(
-            content={"status": "emails_sent", "count": sent_count},
-            status_code=status.HTTP_200_OK,
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Gagal mengirim email token karyawan: {e}",
-        )
-    finally:
-        conn.close()
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail="DEPRECATED: Token email tidak lagi digunakan dalam alur PGI Canteen.",
+    )
 
 
 @router.get("/transaction/check_duplicate", status_code=status.HTTP_200_OK)

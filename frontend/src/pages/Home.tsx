@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import {
   Card,
   CardContent,
@@ -27,6 +27,18 @@ interface Vendor {
   color: string;
 }
 
+interface OrderResult {
+  orderCode: string;
+  orderHash?: string;
+  employeeId: string;
+  employeeName: string;
+  tenantId: number;
+  tenantName: string;
+  menuLabel: string;
+  orderDate: string;
+  queueNumber: number;
+}
+
 function getWhatsAppNumberForTenant(tenantName: string): string | null {
   if (tenantName.includes("Yanti")) return "6285880259653";
   if (tenantName.includes("Rima")) return "6285718899709";
@@ -39,24 +51,18 @@ export default function Home() {
   const [selectedVendor, setSelectedVendor] = useState<Vendor | null>(null);
   const [selectedMenuLabel, setSelectedMenuLabel] = useState<string>("");
   const [isPreorderOpen, setIsPreorderOpen] = useState(false);
-  const [employeeId, setEmployeeId] = useState("");
-  const [token, setToken] = useState("");
-  const [orderResult, setOrderResult] = useState<{
-    orderCode: string;
-    orderHash?: string;
-    employeeId: string;
-    employeeName: string;
-    tenantId: number;
-    tenantName: string;
-    menuLabel: string;
-    orderDate: string;
-    queueNumber: number;
+  const [currentUser, setCurrentUser] = useState<{
+    employee_id: string;
+    name?: string;
+    email?: string;
   } | null>(null);
+  const [authError, setAuthError] = useState<string | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [orderResult, setOrderResult] = useState<OrderResult | null>(null);
   const [preorderError, setPreorderError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showTicket, setShowTicket] = useState(false);
   const [orderDateTimeText, setOrderDateTimeText] = useState("");
-
   function handleOpenPreorder(vendor: Vendor) {
     setSelectedVendor(vendor);
     setSelectedMenuLabel("");
@@ -107,7 +113,9 @@ export default function Home() {
         setVendors(
           overviewData.map((device) => {
             let color = "text-green-500";
-            const available = Number(device.available ?? device.tenant?.available ?? 0);
+            const rawAvailable = Number(
+              device.available ?? device.tenant?.available ?? 0
+            );
             const used = Number(device.ordered ?? device.tenant?.ordered ?? 0);
             const quotaValue = device.tenant?.quota ?? null;
             const quota = typeof quotaValue === "number" ? quotaValue : 0;
@@ -116,6 +124,8 @@ export default function Home() {
             } else if (quota > 0 && used > (quota * 2) / 3) {
               color = "text-yellow-500";
             }
+            const displayAvailable =
+              quota > 0 ? Math.max(quota - used, 0) : rawAvailable;
 
             return {
               deviceCode: device.device_code,
@@ -123,7 +133,7 @@ export default function Home() {
               tenantName: device.tenant.name,
               quota: quotaValue ?? 0,
               menu: device.tenant.menu,
-              available: available,
+              available: displayAvailable,
               used: used,
               lastOrder: device.lastOrder ?? null,
               color: color,
@@ -137,6 +147,62 @@ export default function Home() {
     []
   );
 
+  useEffect(() => {
+    let isMounted = true;
+    async function authenticateFromPortal() {
+      const params = new URLSearchParams(window.location.search);
+      const employeeIdParam = params.get("employee_id");
+      const portalTokenParam = params.get("portal_token");
+
+      if (!employeeIdParam || !portalTokenParam) {
+        if (isMounted) {
+          setAuthError("Akses harus melalui portal. Parameter URL tidak lengkap.");
+          setCurrentUser(null);
+          setAuthLoading(false);
+        }
+        return;
+      }
+
+      try {
+        const resp = await fetch(`${import.meta.env.VITE_API_URL}/auth/portal-login`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            employeeId: employeeIdParam,
+            portalToken: portalTokenParam,
+          }),
+        });
+
+        if (!resp.ok) {
+          throw new Error("Portal session invalid");
+        }
+
+        const data = await resp.json();
+        if (isMounted) {
+          setCurrentUser(data);
+          setAuthError(null);
+        }
+      } catch (error) {
+        console.error("Failed to authenticate via portal:", error);
+        if (isMounted) {
+          setAuthError(
+            "Sesi portal tidak valid. Silakan kembali ke portal dan klik ulang menu Canteen."
+          );
+          setCurrentUser(null);
+        }
+      } finally {
+        if (isMounted) {
+          setAuthLoading(false);
+        }
+      }
+    }
+
+    authenticateFromPortal();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
   async function handlePreorderSubmit() {
     if (!selectedVendor) {
       return;
@@ -147,13 +213,10 @@ export default function Home() {
       return;
     }
 
-    if (!employeeId) {
-      setPreorderError("Employee ID wajib diisi.");
-      return;
-    }
-
-    if (!token) {
-      alert("Token wajib diisi.");
+    if (!currentUser) {
+      setPreorderError(
+        "Sesi portal tidak valid. Silakan kembali ke portal dan buka ulang halaman ini."
+      );
       return;
     }
 
@@ -165,8 +228,7 @@ export default function Home() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          employeeId,
-          token,
+          employeeId: currentUser.employee_id,
           tenantId: selectedVendor.tenantId,
           menuLabel: selectedMenuLabel,
         }),
@@ -221,28 +283,21 @@ export default function Home() {
   }
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const empIdParam = params.get("emp_id");
-    const tokenParam = params.get("token");
-
-    if (empIdParam) {
-      setEmployeeId(empIdParam);
+    if (!currentUser || authError) {
+      return;
     }
-    if (tokenParam) {
-      setToken(tokenParam);
-    }
-  }, []);
-
-  useEffect(() => {
     const controller = new AbortController();
     loadDashboard(controller.signal);
     return () => {
       controller.abort();
     };
-  }, [loadDashboard]);
+  }, [loadDashboard, currentUser, authError]);
 
   useEffect(() => {
-    let eventSource: EventSource;
+    if (!currentUser || authError) {
+      return;
+    }
+    let eventSource: EventSource | null = null;
     function initializeSSE() {
       eventSource = new EventSource(import.meta.env.VITE_API_URL + "/sse");
 
@@ -260,10 +315,15 @@ export default function Home() {
               } else if (newUsed > (vendor.quota * 2) / 3) {
                 newColor = "text-yellow-500";
               }
+              const newAvailable =
+                vendor.quota > 0
+                  ? Math.max(vendor.quota - newUsed, 0)
+                  : vendor.available;
 
               return {
                 ...vendor,
                 used: newUsed,
+                available: newAvailable,
                 lastOrder: vendor.lastOrder
                   ? { ...vendor.lastOrder, employeeName: data.name ?? "" }
                   : {
@@ -282,15 +342,15 @@ export default function Home() {
 
       eventSource.onerror = (err) => {
         console.error("EventSource failed:", err);
-        eventSource.close();
+        eventSource?.close();
       };
     }
     initializeSSE();
 
     return () => {
-      eventSource.close();
+      eventSource?.close();
     };
-  }, []);
+  }, [currentUser, authError]);
 
   useEffect(() => {
     const timerId = setInterval(() => {
@@ -299,6 +359,29 @@ export default function Home() {
 
     return () => clearInterval(timerId);
   }, []);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 text-gray-700">
+        Memuat sesi portal...
+      </div>
+    );
+  }
+
+  if (authError) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-gray-100 px-6">
+        <div className="max-w-md rounded-3xl bg-white p-6 text-center shadow-md border border-red-100">
+          <p className="text-lg font-semibold text-red-600 mb-2">Akses tidak valid</p>
+          <p className="text-sm text-gray-600">{authError}</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!currentUser) {
+    return null;
+  }
 
   return (
     <div className="bg-gray-100 min-h-screen">
@@ -452,26 +535,9 @@ export default function Home() {
                 </label>
                 <input
                   className="w-full rounded-2xl border border-gray-300 px-3 py-2 text-sm bg-gray-50 focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-                  value={employeeId}
+                  value={currentUser?.employee_id ?? ""}
                   readOnly
                 />
-              </div>
-
-              <div className="space-y-1">
-                <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                  Token / Kode Pre-Order
-                </label>
-                <input
-                  type="text"
-                  value={token}
-                  maxLength={6}
-                  onChange={(e) => setToken(e.target.value.toUpperCase())}
-                  placeholder="Masukkan kode 6 karakter"
-                  className="w-full rounded-2xl border border-gray-300 px-3 py-2 text-sm focus:border-blue-500 focus:ring-2 focus:ring-blue-200"
-                />
-                <small className="text-[11px] text-gray-500">
-                  Gunakan kode yang dikirim ke email Anda.
-                </small>
               </div>
 
               {preorderError && (

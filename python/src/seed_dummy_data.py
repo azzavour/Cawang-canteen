@@ -23,29 +23,41 @@ def seed_dummy_data():
             print(f"[{datetime.datetime.now().isoformat()}] Cleared table '{table}'.")
 
         token_hash = hashlib.sha256("1234".encode("utf-8")).hexdigest()
-        cursor.execute(
+        cursor.executemany(
             """
             INSERT INTO employees (
                 employee_id,
-                card_number,
                 name,
                 employee_group,
                 admin,
                 is_disabled,
                 is_blocked,
-                order_token_hash
+                order_token_hash,
+                email
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (
-                "34283",
-                "004854234",
-                "ismail bin mail",
-                "PGI",
-                0,
-                0,
-                0,
-                token_hash,
-            ),
+            [
+                (
+                    "34283",
+                    "ismail bin mail",
+                    "PGI",
+                    0,
+                    0,
+                    0,
+                    token_hash,
+                    "ismail@example.com",
+                ),
+                (
+                    "12345",
+                    "Annisa",
+                    "PGI",
+                    0,
+                    0,
+                    0,
+                    token_hash,
+                    "annisa@example.com",
+                ),
+            ],
         )
         print("Inserted employee dummy data.")
 

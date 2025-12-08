@@ -14,7 +14,6 @@ from src.sqlite_database import get_db_connection
 
 DUMMY_EMAILS: Dict[str, str] = {
     "34283": "annisafitriana38@gmail.com",
-    "34283": "izzynisa.26@gmail.com",
 }
 
 
