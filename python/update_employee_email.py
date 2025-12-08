@@ -1,117 +1,85 @@
-import os
 import sqlite3
 from typing import Dict, Optional
 
-try:
-    import pyodbc
-except ModuleNotFoundError:
-    pyodbc = None
-
-from dotenv import load_dotenv
-
 from src.sqlite_database import get_db_connection
 
-
+# Mapping dummy untuk testing lokal / sementara.
 DUMMY_EMAILS: Dict[str, str] = {
     "34283": "annisafitriana38@gmail.com",
 }
 
 
 def update_employee_email(employee_id: str) -> Optional[str]:
-    """Kembalikan email dummy untuk employee_id jika tersedia."""
-    return DUMMY_EMAILS.get(employee_id)
-
-
-def update_dummy_emails(conn: sqlite3.Connection) -> int:
     """
-    Update kolom email untuk beberapa employee_id secara hardcoded (dummy/testing).
-    Mengembalikan jumlah row yang diupdate.
+    Dipakai di runtime.
+    1. Cek email di tabel employees (SQLite).
+    2. Kalau sudah ada, return.
+    3. Kalau kosong, cek DUMMY_EMAILS. Jika ada, update DB dan return.
+    4. Kalau tidak punya email sama sekali, return None.
     """
-    updated_rows = 0
-    cursor = conn.cursor()
-    for employee_id, email in DUMMY_EMAILS.items():
-        cursor.execute(
-            "UPDATE employees SET email = ? WHERE employee_id = ?",
-            (email, employee_id),
-        )
-        updated_rows += cursor.rowcount
-    return updated_rows
+    employee_id = (employee_id or "").strip()
+    if not employee_id:
+        return None
 
-
-def sync_emails_from_portal(conn: sqlite3.Connection) -> int:
-    """
-    Sinkronisasi email dari database portal ke tabel employees (SQLite).
-    Mengembalikan jumlah row yang berhasil diupdate.
-    """
-    if pyodbc is None:
-        print("pyodbc is not installed; skipping portal email sync.")
-        return 0
-    driver = os.getenv("PORTAL_DB_DRIVER")
-    host = os.getenv("PORTAL_DB_HOST")
-    port = os.getenv("PORTAL_DB_PORT", "1433")
-    db_name = os.getenv("PORTAL_DB_NAME")
-    user = os.getenv("PORTAL_DB_USER")
-    password = os.getenv("PORTAL_DB_PASSWORD")
-    table = os.getenv("PORTAL_DB_TABLE", "PortalEmployees")
-
-    if not all([driver, host, db_name, user, password]):
-        print("Portal DB configuration is incomplete. Skipping portal sync.")
-        return 0
-
-    conn_str = (
-        f"DRIVER={{{driver}}};"
-        f"SERVER={host},{port};"
-        f"DATABASE={db_name};"
-        f"UID={user};"
-        f"PWD={password};"
-    )
-
-    try:
-        portal_conn = pyodbc.connect(conn_str)
-    except Exception as exc:
-        print(f"Failed to connect to portal database: {exc}")
-        return 0
-
-    updated_rows = 0
-    try:
-        portal_cursor = portal_conn.cursor()
-        portal_cursor.execute(
-            f"""
-            SELECT emp_id, email
-            FROM {table}
-            WHERE email IS NOT NULL
-              AND email <> ''
-            """
-        )
-        sqlite_cursor = conn.cursor()
-        for employee_id, email in portal_cursor.fetchall():
-            sqlite_cursor.execute(
-                "UPDATE employees SET email = ? WHERE employee_id = ?",
-                (email, employee_id),
-            )
-            updated_rows += sqlite_cursor.rowcount
-    except Exception as exc:
-        print(f"Failed to sync emails from portal: {exc}")
-    finally:
-        portal_conn.close()
-
-    return updated_rows
-
-
-def main() -> None:
-    load_dotenv()
     conn = get_db_connection()
     try:
-        dummy_updated = update_dummy_emails(conn)
-        portal_updated = sync_emails_from_portal(conn)
-        conn.commit()
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            SELECT email
+            FROM employees
+            WHERE employee_id = ?
+            """,
+            (employee_id,),
+        )
+        row = cursor.fetchone()
+        if row:
+            existing_email = (row["email"] or "").strip()
+            if existing_email:
+                return existing_email
+
+        dummy_email = DUMMY_EMAILS.get(employee_id)
+        if dummy_email:
+            cursor.execute(
+                """
+                UPDATE employees
+                SET email = ?
+                WHERE employee_id = ?
+                """,
+                (dummy_email, employee_id),
+            )
+            conn.commit()
+            return dummy_email
+        return None
     finally:
         conn.close()
 
-    print(f"Dummy emails updated: {dummy_updated}")
-    print(f"Portal emails updated: {portal_updated}")
-    print(f"Total employees updated: {dummy_updated + portal_updated}")
+
+def update_dummy_emails() -> int:
+    """
+    Jalankan saat script dipanggil langsung.
+    Mengisi email berdasarkan DUMMY_EMAILS.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        updated_rows = 0
+        for employee_id, email in DUMMY_EMAILS.items():
+            cursor.execute(
+                """
+                UPDATE employees
+                SET email = ?
+                WHERE employee_id = ?
+                """,
+                (email, employee_id),
+            )
+            updated_rows += cursor.rowcount
+        conn.commit()
+        return updated_rows
+    finally:
+        conn.close()
 
 
 if __name__ == "__main__":
-    main()
+    updated = update_dummy_emails()
+    print(f"Dummy emails applied to SQLite employees table: {updated}")
