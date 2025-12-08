@@ -52,9 +52,9 @@ def verify_portal_token(employee_id: str, portal_token: str) -> Optional[Dict[st
             cursor = portal_conn.cursor()
             cursor.execute(
                 f"""
-                SELECT employee_id, name, email
+                SELECT emp_id, name, email
                 FROM {table}
-                WHERE employee_id = ? AND portal_token = ?
+                WHERE emp_id = ? AND portal_token = ?
                 """,
                 (employee_id, portal_token),
             )

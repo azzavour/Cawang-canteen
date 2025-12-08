@@ -77,7 +77,7 @@ def sync_emails_from_portal(conn: sqlite3.Connection) -> int:
         portal_cursor = portal_conn.cursor()
         portal_cursor.execute(
             f"""
-            SELECT employee_id, email
+            SELECT emp_id, email
             FROM {table}
             WHERE email IS NOT NULL
               AND email <> ''
