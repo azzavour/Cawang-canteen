@@ -4,10 +4,12 @@ from email.message import EmailMessage
 from typing import Any, Dict, List, Optional
 from urllib.parse import quote_plus
 
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
-SMTP_USERNAME = os.getenv("SMTP_USERNAME")
-SMTP_PASSWORD = os.getenv("SMTP_PASSWORD")
+SMTP_HOST = os.getenv("SMTP_HOST", "localhost")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "25"))
+SMTP_USERNAME = os.getenv("SMTP_USERNAME") or ""
+SMTP_PASSWORD = os.getenv("SMTP_PASSWORD") or ""
+SMTP_USE_TLS = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+SMTP_USE_AUTH = os.getenv("SMTP_USE_AUTH", "true").lower() == "true"
 SMTP_FROM = os.getenv("SMTP_FROM", SMTP_USERNAME or "no-reply@pgi-canteen.local")
 
 
@@ -178,8 +180,15 @@ Harap tunjukkan tiket ini saat pengambilan pesanan dan foto bukti order untuk di
     msg.set_content(plain_text)
     msg.add_alternative(html_body, subtype="html")
 
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
-        server.starttls()
-        if SMTP_USERNAME and SMTP_PASSWORD:
-            server.login(SMTP_USERNAME, SMTP_PASSWORD)
-        server.send_message(msg)
+    try:
+        with smtplib.SMTP(SMTP_HOST, SMTP_PORT) as server:
+            server.ehlo()
+            if SMTP_USE_TLS:
+                server.starttls()
+                server.ehlo()
+            if SMTP_USE_AUTH and SMTP_USERNAME and SMTP_PASSWORD:
+                server.login(SMTP_USERNAME, SMTP_PASSWORD)
+            server.send_message(msg)
+    except Exception as exc:
+        print(f"Failed to send email: {exc!r}")
+        raise
