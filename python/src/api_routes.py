@@ -235,7 +235,7 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
     try:
         cursor.execute(
             """
-            SELECT employee_id, card_number, name, is_disabled, is_blocked, email
+            SELECT employee_id, card_number, name, is_disabled, is_blocked, email, employee_group
             FROM employees
             WHERE employee_id = ?
             """,
@@ -351,6 +351,28 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
                 preorder.menu_label,
                 today,
                 queue_number,
+            ),
+        )
+        cursor.execute(
+            """
+            INSERT INTO transactions (
+                card_number,
+                employee_id,
+                employee_name,
+                employee_group,
+                tenant_id,
+                tenant_name,
+                transaction_date
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                card_number,
+                preorder.employee_id,
+                employee["name"],
+                employee["employee_group"],
+                tenant["id"],
+                tenant["name"],
+                today,
             ),
         )
         conn.commit()
