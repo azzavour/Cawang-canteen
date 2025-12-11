@@ -84,7 +84,17 @@ def log_buffer(device_id):
             sound_manager.play_failed()
             return
 
-        if tenant_info.get("is_limited"):
+        tenant_id = tenant_info.get("id")
+        is_limited = bool(tenant_info.get("is_limited"))
+
+        if tenant_id is None:
+            print(
+                f"[{device_id}] Tenant ID tidak ditemukan dalam mapping. Transaksi dibatalkan."
+            )
+            sound_manager.play_failed()
+            return
+
+        if is_limited:
             duplicate_check_response = requests.get(
                 f"{API_BASE_URL}/transaction/check_duplicate",
                 params={
@@ -99,8 +109,6 @@ def log_buffer(device_id):
                 )
                 sound_manager.play_failed()
                 return
-
-        tenant_id = tenant_info.get("id")
 
         try:
             quota_response = requests.get(
