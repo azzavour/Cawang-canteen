@@ -4,36 +4,14 @@ import requests
 import os
 from dotenv import load_dotenv
 
-from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
-
 from .inputs import create_input_window_and_loop
 from .sound_manager import SoundManager
 from . import app_state
-from .api_routes import router
-
-load_dotenv()
-
-app = FastAPI()
-
-origins = [
-    "http://localhost:5173",
-    "http://127.0.0.1:5173",
-]
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=origins,
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-app.include_router(router)
 
 # --- Configuration ---
 API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:8000")
 DEBOUNCE_SECONDS = float(os.getenv("DEBOUNCE_SECONDS", 0.2))
+APP_STATE_REFRESH_SECONDS = int(os.getenv("APP_STATE_REFRESH_SECONDS", 300))
 
 # --- Global State for this process ---
 sound_manager = SoundManager(asset_dir="assets")
@@ -44,6 +22,7 @@ last_input_strings = {}
 
 
 def log_buffer(device_id):
+    app_state.ensure_data_fresh(APP_STATE_REFRESH_SECONDS)
     with buffer_lock:
         local_buffer = input_buffers.get(device_id, [])
         input_buffers[device_id] = []

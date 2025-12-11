@@ -295,6 +295,7 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
+        conn.execute("BEGIN IMMEDIATE TRANSACTION")
         cursor.execute(
             """
             SELECT employee_id, card_number, name, is_disabled, is_blocked, email, employee_group
@@ -349,6 +350,31 @@ def create_preorder(preorder: PreorderCreateRequest, background_tasks: Backgroun
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Anda sudah melakukan pre-order hari ini. Hanya satu order per hari yang diperbolehkan.",
+            )
+
+        cursor.execute(
+            """
+            SELECT id
+            FROM preorders
+            WHERE employee_id = ?
+              AND tenant_id = ?
+              AND order_date = ?
+              AND menu_label = ?
+              AND created_at >= datetime('now','localtime','-15 seconds')
+            ORDER BY id DESC
+            LIMIT 1
+            """,
+            (
+                preorder.employee_id,
+                preorder.tenant_id,
+                today,
+                preorder.menu_label,
+            ),
+        )
+        if cursor.fetchone():
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Pesanan ini sudah tercatat. Kemungkinan Anda menekan tombol dua kali atau membuka lebih dari satu tab.",
             )
 
         cursor.execute(
