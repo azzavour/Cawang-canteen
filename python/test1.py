@@ -18,7 +18,7 @@ def simulate_tap():
 
     # 2. kalau boleh, kirim transaksi seperti device
     payload = {
-        "employeeid": EMPLOYEE_ID,
+        "employeeId": EMPLOYEE_ID,
         "tenantId": TENANT_ID,
         "transactionDate": CARD_ID,  # sesuaikan field persis dengan /transaction kamu
     }
